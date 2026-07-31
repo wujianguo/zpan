@@ -169,6 +169,64 @@ jobs:
       - name: Patch wrangler.toml with D1 database ID
         run: sed -i "s/database_id = \"[^\"]*\"/database_id = \"${{ steps.d1.outputs.id }}\"/" wrangler.toml
 
+      - name: Disable upstream instance telemetry cron
+        run: |
+          node <<'NODE'
+          const fs = require('node:fs')
+
+          const path = 'wrangler.toml'
+          const target = '0 */12 * * *'
+          const source = fs.readFileSync(path, 'utf8')
+          const sections = [...source.matchAll(/^\[([^\]]+)\]\s*$/gm)]
+          const triggers = sections.filter((match) => match[1] === 'triggers')
+          if (triggers.length !== 1) {
+            throw new Error(`Expected one top-level [triggers] section, found ${triggers.length}`)
+          }
+
+          const start = triggers[0].index + triggers[0][0].length
+          const nextSection = sections.find((match) => match.index > triggers[0].index)
+          const end = nextSection?.index ?? source.length
+          const section = source.slice(start, end)
+          const assignments = [...section.matchAll(/^\s*crons\s*=\s*(\[[^\n]*\])\s*$/gm)]
+          if (assignments.length !== 1) {
+            throw new Error(`Expected one single-line crons array in [triggers], found ${assignments.length}`)
+          }
+
+          let crons
+          try {
+            crons = JSON.parse(assignments[0][1])
+          } catch (error) {
+            throw new Error(`Unable to parse [triggers].crons: ${error.message}`)
+          }
+          if (!Array.isArray(crons) || crons.some((cron) => typeof cron !== 'string')) {
+            throw new Error('[triggers].crons must be an array of strings')
+          }
+
+          const occurrences = crons.filter((cron) => cron === target).length
+          if (occurrences > 1) {
+            throw new Error(`Instance telemetry cron appears ${occurrences} times`)
+          }
+          const updatedCrons = crons.filter((cron) => cron !== target)
+          if (updatedCrons.includes(target)) {
+            throw new Error('Failed to remove instance telemetry cron')
+          }
+          if (updatedCrons.length > 5) {
+            throw new Error(`Cloudflare plan allows 5 cron triggers, found ${updatedCrons.length}`)
+          }
+
+          if (occurrences === 1) {
+            const assignmentStart = start + assignments[0].index
+            const arrayStart = assignmentStart + assignments[0][0].indexOf(assignments[0][1])
+            const arrayEnd = arrayStart + assignments[0][1].length
+            const updated = source.slice(0, arrayStart) + JSON.stringify(updatedCrons) + source.slice(arrayEnd)
+            fs.writeFileSync(path, updated)
+            console.log(`Removed instance telemetry cron: ${target}`)
+          } else {
+            console.log(`Instance telemetry cron already absent: ${target}`)
+          }
+          console.log(`Cloudflare cron trigger count: ${updatedCrons.length}`)
+          NODE
+
       - name: Set BETTER_AUTH_SECRET (first deploy only)
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
