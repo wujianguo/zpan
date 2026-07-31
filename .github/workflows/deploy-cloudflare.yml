@@ -256,6 +256,32 @@ jobs:
           ZPAN_APP_COMMIT: ${{ github.sha }}
         run: pnpm build
 
+      # Cloudflare rejects an atomic 6-to-5 schedule update when the account is
+      # already over its plan limit. Remove the disabled trigger first so the
+      # subsequent Wrangler reconciliation starts at the allowed limit.
+      - name: Remove existing instance telemetry cron
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          CRON='0 */12 * * *'
+          BASE_URL="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/zpan/schedules"
+          SCHEDULES=$(curl -fsS "$BASE_URL" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+          if echo "$SCHEDULES" | jq -e --arg cron "$CRON" '.result[]? | select(.cron == $cron)' > /dev/null; then
+            ENCODED_CRON=$(jq -rn --arg cron "$CRON" '$cron | @uri')
+            RESPONSE=$(curl -fsS -X DELETE "$BASE_URL/$ENCODED_CRON" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
+            if ! echo "$RESPONSE" | jq -e '.success == true' > /dev/null; then
+              echo "$RESPONSE"
+              echo "::error::Failed to remove existing instance telemetry cron"
+              exit 1
+            fi
+            echo "Removed existing instance telemetry cron: $CRON"
+          else
+            echo "Instance telemetry cron already absent: $CRON"
+          fi
+
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
