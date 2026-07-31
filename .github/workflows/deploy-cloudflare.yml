@@ -273,10 +273,13 @@ jobs:
             exit 1
           fi
 
+          # The API rejects an empty schedule list, so first replace the old
+          # over-limit set with one retained schedule before installing all five.
+          FIRST_SCHEDULE=$(echo "$SCHEDULES" | jq -c '.[0:1]')
           curl -fsS -X PUT "$BASE_URL" \
             -H "$AUTH_HEADER" \
             -H "Content-Type: application/json" \
-            --data '[]' > /dev/null
+            --data "$FIRST_SCHEDULE" > /dev/null
           RESPONSE=$(curl -fsS -X PUT "$BASE_URL" \
             -H "$AUTH_HEADER" \
             -H "Content-Type: application/json" \
