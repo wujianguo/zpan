@@ -268,7 +268,7 @@ jobs:
           BASE_URL="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/scripts/zpan/schedules"
           SCHEDULES=$(curl -fsS "$BASE_URL" \
             -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
-          if echo "$SCHEDULES" | jq -e --arg cron "$CRON" '.result[]? | select(.cron == $cron)' > /dev/null; then
+          if echo "$SCHEDULES" | jq -e --arg cron "$CRON" '.. | strings | select(. == $cron)' > /dev/null; then
             ENCODED_CRON=$(jq -rn --arg cron "$CRON" '$cron | @uri')
             RESPONSE=$(curl -fsS -X DELETE "$BASE_URL/$ENCODED_CRON" \
               -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN")
